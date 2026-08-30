@@ -1,0 +1,410 @@
+{
+  "name": "NewsIQ_02_Research_Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyDay",
+            "hour": 8,
+            "minute": 30
+          }
+        ]
+      },
+      "id": "c075737f-1001-477b-940c-74168b0ac80c",
+      "name": "Research_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        250,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, original_title, description, content, category FROM headlines WHERE status = 'pending_research' ORDER BY scraped_at DESC LIMIT 100;",
+        "options": {}
+      },
+      "id": "8d0f2f5d-f2be-4f71-adcf-ad875908a015",
+      "name": "Get_Pending_Headlines",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "d2daef51-2012-458f-9405-6d01b1a9b0f9",
+      "name": "Split_Headlines",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        250,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.serpapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.original_title }}"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.SERPAPI_KEY }}"
+            },
+            {
+              "name": "num",
+              "value": "3"
+            },
+            {
+              "name": "gl",
+              "value": "us"
+            },
+            {
+              "name": "type",
+              "value": "news"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "7ff4ce0c-0f32-444b-a707-f1d62568b11d",
+      "name": "Search_Web_SerpAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        250,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst results = data.organic_results || [];\nconst sources = results.slice(0, 3).map(r => ({\n  title: r.title,\n  url: r.link,\n  snippet: r.snippet,\n  source: r.source || 'Unknown'\n}));\n\nreturn {\n  json: {\n    headline_id: $input.first().json.headline_id,\n    headline_title: $input.first().json.original_title,\n    search_results: sources,\n    search_result_count: sources.length\n  }\n};"
+      },
+      "id": "c5ec7962-deb8-43a3-96a3-2bf7354bbb3b",
+      "name": "Extract_Search_Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        250,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.CLAUDE_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "claude-3-sonnet-20240229",
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "role": "user",
+              "content": "={{ 'Analyze this headline and search results. Extract key facts, identify contradictions, assign confidence.\\n\\nHeadline: ' + $json.headline_title + '\\n\\nSearch Results: ' + JSON.stringify($json.search_results) + '\\n\\nRespond in JSON with: summary, key_facts[{fact, confidence, sources_mentioning}], contradictions[{claim, conflict, sources}], verification_status' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "823a4be2-f4d5-44ba-ba16-b887d4db886c",
+      "name": "Claude_Fact_Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nlet text = response.content?.[0]?.text || response.content || '';\n\n// Extract JSON from markdown\nif (text.includes('```json')) {\n  text = text.split('```json')[1].split('```')[0].trim();\n} else if (text.includes('```')) {\n  const parts = text.split('```');\n  if (parts.length >= 3) text = parts[1].trim();\n}\n\nlet researchData;\ntry {\n  researchData = JSON.parse(text);\n} catch (e) {\n  // Try regex fallback\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try { researchData = JSON.parse(match[0]); } catch { researchData = null; }\n  }\n}\n\nif (!researchData) {\n  researchData = {\n    summary: 'Research parsing failed',\n    key_facts: [],\n    contradictions: [],\n    verification_status: 'unverified'\n  };\n}\n\nreturn {\n  json: {\n    headline_id: $input.first().json.headline_id,\n    headline_title: $input.first().json.headline_title,\n    research_data: researchData,\n    source_urls: $input.first().json.search_results.map(s => s.url),\n    raw_response: text\n  }\n};"
+      },
+      "id": "538472db-9f2a-4772-b550-3cac53e8b81a",
+      "name": "Parse_Claude_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO research (headline_id, summary, key_facts, contradictions, verification_status, source_urls, generated_at) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6::jsonb, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "97caa7f8-fc8b-4771-b099-4384fadbc81e",
+      "name": "Insert_Research",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE headlines SET status = 'researched' WHERE id = $1 RETURNING id;",
+        "options": {}
+      },
+      "id": "6cc1e65f-bf47-4c39-ad2f-5453be075870",
+      "name": "Update_Headline_Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1540
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "4a6d3938-cbc8-485a-8ef1-22255286cee1",
+      "name": "Research_Loop_Accumulator",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (workflow, level, message, metadata, created_at) VALUES ('research', 'INFO', 'Research agent completed batch', $1::jsonb, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "835bd4e9-a364-4581-ac6e-17eb2005b9b1",
+      "name": "Log_Research_Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1900
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "success",
+              "value": "true"
+            },
+            {
+              "name": "workflow",
+              "value": "research"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "ebcaf2f9-874b-4450-9424-8d4e684dd5fd",
+      "name": "Research_Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        250,
+        2080
+      ]
+    }
+  ],
+  "connections": {
+    "Research_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Pending_Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Pending_Headlines": {
+      "main": [
+        [
+          {
+            "node": "Split_Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split_Headlines": {
+      "main": [
+        [
+          {
+            "node": "Search_Web_SerpAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search_Web_SerpAPI": {
+      "main": [
+        [
+          {
+            "node": "Extract_Search_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract_Search_Results": {
+      "main": [
+        [
+          {
+            "node": "Claude_Fact_Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude_Fact_Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse_Claude_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse_Claude_Response": {
+      "main": [
+        [
+          {
+            "node": "Insert_Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Research": {
+      "main": [
+        [
+          {
+            "node": "Update_Headline_Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update_Headline_Status": {
+      "main": [
+        [
+          {
+            "node": "Research_Loop_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research_Loop_Accumulator": {
+      "main": [
+        [
+          {
+            "node": "Log_Research_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Research_Results": {
+      "main": [
+        [
+          {
+            "node": "Research_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "news-iq"
+    },
+    {
+      "name": "research"
+    }
+  ]
+}
+

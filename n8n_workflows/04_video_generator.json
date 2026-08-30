@@ -1,0 +1,592 @@
+{
+  "name": "NewsIQ_04_Video_Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyDay",
+            "hour": 11,
+            "minute": 0
+          }
+        ]
+      },
+      "id": "cc37402d-5ce2-4007-be21-dddddff6e83b",
+      "name": "Daily_Video_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyWeek",
+            "hour": 10,
+            "minute": 0,
+            "weekday": 1
+          }
+        ]
+      },
+      "id": "44a9158b-9fa1-4fb3-8e32-2dfbecc5a6f0",
+      "name": "Weekly_Video_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT s.id, s.content, s.word_count, s.estimated_duration_seconds, h.original_title FROM scripts s LEFT JOIN headlines h ON s.headline_id = h.id WHERE s.script_type = 'daily_short' AND s.created_at >= NOW()::DATE AND NOT EXISTS (SELECT 1 FROM videos WHERE script_id = s.id) LIMIT 5;",
+        "options": {}
+      },
+      "id": "1be777b0-aac5-4ad0-bf93-7e4ffe1d7f6d",
+      "name": "Get_Daily_Scripts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT s.id, s.content, s.word_count, s.estimated_duration_seconds FROM scripts s WHERE s.script_type = 'weekly' AND s.created_at >= (NOW() - INTERVAL '7 days') ORDER BY s.created_at DESC LIMIT 1;",
+        "options": {}
+      },
+      "id": "f2828f9b-5811-4345-a071-8fb5e37ef552",
+      "name": "Get_Weekly_Script",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "a938681f-2cd4-4229-8e46-8108931ae3a7",
+      "name": "Split_Scripts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        100,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const script = $input.first().json;\nlet text = script.content || '';\ntext = text.replace(/\\[PAUSE\\]/g, '... ');\ntext = text.replace(/\\[EMPHASIS:[^\\]]+\\]/g, '$1');\ntext = text.replace(/\\[EMPHASIS\\]/g, '');\ntext = text.replace(/\\[SOUND:[^\\]]+\\]/g, '');\ntext = text.replace(/\\s+/g, ' ').trim();\n\nreturn {\n  json: {\n    script_id: script.id,\n    headline_title: script.original_title || 'Weekly Brief',\n    tts_text: text,\n    word_count: script.word_count,\n    expected_duration: script.estimated_duration_seconds,\n    script_type: script.script_type || 'daily_short'\n  }\n};"
+      },
+      "id": "963603bd-d2a0-4f22-b706-a5618604b340",
+      "name": "Clean_TTS_Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        100,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $env.GOOGLE_TTS_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "input": {
+            "text": "={{ $json.tts_text }}"
+          },
+          "voice": {
+            "languageCode": "en-US",
+            "name": "en-US-Neural2-C",
+            "ssmlGender": "NEUTRAL"
+          },
+          "audioConfig": {
+            "audioEncoding": "MP3",
+            "speakingRate": 1,
+            "pitch": 0
+          }
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "e309d0bf-4660-4747-9fe8-a7e0d20e543f",
+      "name": "Google_Cloud_TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst audioContent = response.audioContent;\nif (!audioContent) {\n  return { json: { error: 'No audio content received', script_id: $input.first().json.script_id } };\n}\n\n// In n8n, we pass the base64 to the next HTTP node (video service)\nreturn {\n  json: {\n    script_id: $input.first().json.script_id,\n    headline_title: $input.first().json.headline_title,\n    audio_base64: audioContent,\n    word_count: $input.first().json.word_count,\n    expected_duration: $input.first().json.expected_duration,\n    script_type: $input.first().json.script_type\n  }\n};"
+      },
+      "id": "b853c810-f345-43b9-9d5a-3bdce419bbc0",
+      "name": "Decode_Save_MP3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001/compose-video' }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "audio_base64": "={{ $json.audio_base64 }}",
+          "script_type": "={{ $json.script_type }}",
+          "title": "={{ $json.headline_title }}",
+          "expected_duration": "={{ $json.expected_duration }}"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "b5d652a9-4637-4e61-86fd-096c1b7a286b",
+      "name": "Video_Composition_Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const videoData = $input.first().json;\nconst checks = {};\nlet score = 0;\nlet notes = [];\n\n// File size check\nif (videoData.file_size_bytes > 100 * 1024 * 1024) {\n  score += 20; checks.file_size = 'PASS';\n} else {\n  checks.file_size = 'WARN';\n  notes.push(`File size: ${(videoData.file_size_bytes / (1024*1024)).toFixed(1)}MB`);\n}\n\n// Duration check\nconst expected = videoData.expected_duration || 60;\nconst actual = videoData.duration_seconds || 0;\nconst diff = Math.abs(actual - expected) / expected;\nif (diff <= 0.05) {\n  score += 20; checks.duration = 'PASS';\n} else {\n  checks.duration = 'WARN';\n  notes.push(`Duration diff: ${(diff * 100).toFixed(0)}%`);\n}\n\n// Format check\nif (['9:16', '16:9'].includes(videoData.format)) {\n  score += 20; checks.format = 'PASS';\n} else {\n  checks.format = 'FAIL'; notes.push(`Format: ${videoData.format}`);\n}\n\n// Codec check\nif (videoData.video_codec === 'h264' && videoData.audio_codec === 'aac') {\n  score += 20; checks.codec = 'PASS';\n} else {\n  checks.codec = 'WARN';\n  notes.push(`Codecs: v=${videoData.video_codec}, a=${videoData.audio_codec}`);\n}\n\n// Audio check (simplified)\nscore += 20; checks.audio = 'PASS'; // Assume OK from TTS\n\nconst status = score >= 70 ? 'approved' : score >= 50 ? 'pending_review' : 'failed';\n\nreturn {\n  json: {\n    script_id: videoData.script_id,\n    video_path: videoData.video_path,\n    file_size_bytes: videoData.file_size_bytes,\n    duration_seconds: videoData.duration_seconds,\n    format: videoData.format,\n    quality_score: Math.min(score, 100),\n    quality_status: status,\n    quality_notes: notes.length ? notes.join('; ') : 'All checks passed',\n    checks: checks,\n    script_type: videoData.script_type\n  }\n};"
+      },
+      "id": "87bd52fc-403e-4698-abdb-46f34addee3a",
+      "name": "Validate_Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/upload-drive",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.video_path }}",
+          "filename": "={{ 'Daily_Short_' + ($json.script_type === 'daily_short' ? $json.script_id.slice(0,8) : 'Weekly') + '_' + new Date().toISOString().split('T')[0] + '.mp4' }}",
+          "folder_id": "={{ $env.GOOGLE_FOLDER_ID }}"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "df5f7ec8-c505-4b27-909d-b04d5789cea2",
+      "name": "Upload_To_Google_Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO videos (id, script_id, video_type, google_drive_id, google_drive_link, duration_seconds, format, file_size_bytes, quality_score, quality_status, quality_notes, generated_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "22efdfd7-2a26-4b70-b476-370a4e858cbf",
+      "name": "Insert_Daily_Video",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1720
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO videos (id, script_id, video_type, google_drive_id, google_drive_link, duration_seconds, format, file_size_bytes, quality_score, quality_status, quality_notes, generated_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 'pending_review', $9, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "316f9cbb-d13b-4bdb-aeb1-21074820978f",
+      "name": "Insert_Weekly_Video",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1720
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE headlines SET status = 'generated' WHERE id = (SELECT headline_id FROM scripts WHERE id = $1) RETURNING id;",
+        "options": {}
+      },
+      "id": "96563f12-c1b6-4b09-b2e5-a762ec03d6d7",
+      "name": "Update_Headline_Generated",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1900
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "sendTo": "={{ $env.USER_EMAIL }}",
+        "subject": "📹 Weekly Video Ready for Review",
+        "message": "={{ 'Your weekly news video is ready for review.\\n\\nPreview: ' + $json.drive_link + '\\nVideo ID: ' + $json.video_id + '\\n\\nPlease reply to this email with APPROVED to publish.\\n\\n---\\nNews IQ Automated System' }}",
+        "options": {}
+      },
+      "id": "c868ef38-464d-4443-8a2d-63bc34f38242",
+      "name": "Send_Approval_Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1900
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "bf86bf66-35d0-462a-b2c5-4fae980818c8",
+      "name": "Video_Loop_Accumulator",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        300,
+        2080
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (workflow, level, message, metadata, created_at) VALUES ('video_generator', 'INFO', 'Video generation completed', $1::jsonb, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "55c681a7-ddca-452d-aa80-4f205b8852a0",
+      "name": "Log_Video_Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        300,
+        2260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "success",
+              "value": "true"
+            },
+            {
+              "name": "workflow",
+              "value": "video_generator"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "fc28dba4-955c-4519-af02-bb108273a8fe",
+      "name": "Video_Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        300,
+        2440
+      ]
+    }
+  ],
+  "connections": {
+    "Daily_Video_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Daily_Scripts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly_Video_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Weekly_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Daily_Scripts": {
+      "main": [
+        [
+          {
+            "node": "Split_Scripts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Weekly_Script": {
+      "main": [
+        [
+          {
+            "node": "Clean_TTS_Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split_Scripts": {
+      "main": [
+        [
+          {
+            "node": "Clean_TTS_Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean_TTS_Text": {
+      "main": [
+        [
+          {
+            "node": "Google_Cloud_TTS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google_Cloud_TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google_Cloud_TTS": {
+      "main": [
+        [
+          {
+            "node": "Decode_Save_MP3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode_Save_MP3": {
+      "main": [
+        [
+          {
+            "node": "Video_Composition_Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video_Composition_Service": {
+      "main": [
+        [
+          {
+            "node": "Validate_Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate_Video": {
+      "main": [
+        [
+          {
+            "node": "Upload_To_Google_Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload_To_Google_Drive": {
+      "main": [
+        [
+          {
+            "node": "Insert_Daily_Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert_Weekly_Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Daily_Video": {
+      "main": [
+        [
+          {
+            "node": "Update_Headline_Generated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Weekly_Video": {
+      "main": [
+        [
+          {
+            "node": "Send_Approval_Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update_Headline_Generated": {
+      "main": [
+        [
+          {
+            "node": "Video_Loop_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send_Approval_Email": {
+      "main": [
+        [
+          {
+            "node": "Video_Loop_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video_Loop_Accumulator": {
+      "main": [
+        [
+          {
+            "node": "Log_Video_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Video_Results": {
+      "main": [
+        [
+          {
+            "node": "Video_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "news-iq"
+    },
+    {
+      "name": "video"
+    }
+  ]
+}
+

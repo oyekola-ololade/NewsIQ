@@ -1,0 +1,638 @@
+{
+  "name": "NewsIQ_03_Script_Writer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyDay",
+            "hour": 9,
+            "minute": 30
+          }
+        ]
+      },
+      "id": "ee94ed8d-32ff-4d25-9504-c9d318189a5d",
+      "name": "Daily_Script_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyWeek",
+            "hour": 18,
+            "minute": 0,
+            "weekday": 0
+          }
+        ]
+      },
+      "id": "6c93a5b9-4815-49f4-894a-4087bf9f9839",
+      "name": "Weekly_Script_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT h.id, h.original_title, h.category, r.summary, r.key_facts, r.verification_status FROM headlines h JOIN research r ON h.id = r.headline_id WHERE h.status = 'researched' AND h.scraped_at >= NOW()::DATE ORDER BY h.published_at DESC;",
+        "options": {}
+      },
+      "id": "33998306-aa98-4b7a-841e-57ca1fdd2f3e",
+      "name": "Get_Today_Headlines",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT h.id, h.original_title, h.category, r.summary, r.key_facts, r.verification_status FROM headlines h JOIN research r ON h.id = r.headline_id WHERE h.status = 'researched' AND h.category = 'world' AND h.scraped_at >= (NOW() - INTERVAL '7 days') ORDER BY h.published_at DESC;",
+        "options": {}
+      },
+      "id": "7f9a972a-f2f7-43fa-a2d0-342e4fdc279f",
+      "name": "Get_Week_Headlines",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "45e72bfe-fc44-4101-8a1e-c23aaa942e9c",
+      "name": "Split_Daily_Headlines",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        100,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const headline = $input.first().json;\nconst facts = headline.key_facts || [];\nconst factsText = facts.slice(0, 3).map(f => `- ${f.fact || f} (confidence: ${f.confidence || 'unknown'})`).join('\\n');\n\nconst prompt = `Write a punchy 30-60 second script for a news short video. Must include: hook (first 3 seconds), key facts, call-to-action.\n\nHeadline: ${headline.original_title}\nResearch Summary: ${headline.summary || ''}\nKey Facts:\n${factsText}\n\nUse these markers:\n[PAUSE] - natural pause (0.5-1 second)\n[EMPHASIS:word] - emphasize this word\n[SOUND:alert] - sound effect cue\n\nStart with a hook that grabs attention. Keep language conversational and energetic. End with a clear CTA to subscribe/follow.\n\nScript:`;\n\nreturn { json: { headline_id: headline.id, prompt: prompt, headline_title: headline.original_title } };"
+      },
+      "id": "7488abe8-c20a-4e57-a705-ebc5741fd83f",
+      "name": "Format_Daily_Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        100,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.CLAUDE_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "claude-3-sonnet-20240229",
+          "max_tokens": 500,
+          "messages": [
+            {
+              "role": "user",
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "166e894e-7c7d-48ee-8493-dee16bc1b6d6",
+      "name": "Claude_Daily_Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst scriptText = response.content?.[0]?.text || response.content || '';\n\n// Clean markers for word count\nlet clean = scriptText.replace(/\\[PAUSE\\]/g, ' ');\nclean = clean.replace(/\\[EMPHASIS:[^\\]]+\\]/g, '$1');\nclean = clean.replace(/\\[EMPHASIS\\]/g, '');\nclean = clean.replace(/\\[SOUND:[^\\]]+\\]/g, '');\nclean = clean.replace(/\\s+/g, ' ').trim();\n\nconst words = clean.split(/\\s+/).filter(w => w.length > 0);\nconst wordCount = words.length;\nconst durationSeconds = Math.round((wordCount / 150) * 60);\n\nconst errors = [];\nif (wordCount < 45) errors.push(`Too short: ${wordCount} words (min 45)`);\nif (wordCount > 150) errors.push(`Too long: ${wordCount} words (max 150)`);\nif (durationSeconds < 20) errors.push(`Too short: ${durationSeconds}s`);\nif (durationSeconds > 90) errors.push(`Too long: ${durationSeconds}s`);\nif (!scriptText.includes('[PAUSE]')) errors.push('Missing [PAUSE] markers');\n\nconst hasHook = /breaking|just announced|here's what|you need to know|big news/i.test(scriptText);\nif (!hasHook) errors.push('Weak hook');\n\nconst hasCTA = /subscribe|follow|like|share/i.test(scriptText);\nif (!hasCTA) errors.push('Missing CTA');\n\nreturn {\n  json: {\n    headline_id: $input.first().json.headline_id,\n    headline_title: $input.first().json.headline_title,\n    script_content: scriptText,\n    word_count: wordCount,\n    duration_seconds: durationSeconds,\n    valid: errors.length === 0,\n    errors: errors,\n    script_type: 'daily_short',\n    tone: 'professional'\n  }\n};"
+      },
+      "id": "340a5771-5e7d-4959-b2eb-1277f27e741e",
+      "name": "Validate_Daily_Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO scripts (id, headline_id, script_type, content, word_count, estimated_duration_seconds, tone, generated_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "135038e2-644c-4251-b457-fb897a77d2dc",
+      "name": "Insert_Daily_Script",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE headlines SET status = 'scripted' WHERE id = $1 RETURNING id;",
+        "options": {}
+      },
+      "id": "31ba1e48-21a1-45a5-967e-bb4434ccf132",
+      "name": "Update_Headline_Scripted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "fcec262f-4740-4da8-83ad-37180f3807f5",
+      "name": "Daily_Loop_Accumulator",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const headlines = $input.first().json;\nconst headlinesText = headlines.map((h, i) => `${i+1}. ${h.original_title} - ${(h.summary || '').substring(0, 100)}...`).join('\\n');\n\nconst prompt = `Rank these world news stories by importance, impact, and geopolitical relevance. Return the top 5 most significant stories.\n\nHeadlines:\n${headlinesText}\n\nRespond in JSON:\n{\n  \"top_stories\": [\n    {\n      \"title\": \"Story title\",\n      \"ranking_reason\": \"Why this story matters\"\n    }\n  ]\n}`;\n\nreturn { json: { headlines: headlines, prompt: prompt } };"
+      },
+      "id": "0226b715-5d9f-46dd-8da1-d7e7e0c15101",
+      "name": "Format_Weekly_Ranking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        500,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.CLAUDE_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "claude-3-sonnet-20240229",
+          "max_tokens": 500,
+          "messages": [
+            {
+              "role": "user",
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a28ff0f6-a043-4c7e-990d-30aa096f3ad6",
+      "name": "Claude_Weekly_Ranking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nlet text = response.content?.[0]?.text || '';\n\nif (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();\nelse if (text.includes('```')) {\n  const parts = text.split('```');\n  if (parts.length >= 3) text = parts[1].trim();\n}\n\nlet ranking;\ntry { ranking = JSON.parse(text); } catch {\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { ranking = JSON.parse(match[0]); } catch {} }\n}\n\nconst topStories = ranking?.top_stories || [];\nconst storiesText = topStories.map((s, i) => `Story ${i+1}: ${s.title}\\nReason: ${s.ranking_reason}`).join('\\n\\n');\n\nconst prompt = `Write a professional 5-10 minute news recap script for YouTube.\nFormat: Intro (10s) -> 5 story segments (2 min each) -> Outro (30s)\n\nInclude:\n- Host intro: \"Welcome to this week's news brief...\"\n- For each story: headline, key facts, why it matters, brief analysis\n- Smooth transitions between stories\n- Outro with call-to-action to subscribe\n\nUse [PAUSE] and [EMPHASIS:word] markers.\nMaintain consistent host tone: professional, engaging, conversational.\n\nTarget: 750-1500 words (~5-10 minutes at 150 wpm)\n\nTop Stories:\n${storiesText}\n\nFull Script:`;\n\nreturn { json: { prompt: prompt, top_stories: topStories } };"
+      },
+      "id": "4e47a1fe-a8c1-4831-b91f-a541882198a9",
+      "name": "Parse_Ranking_Build_Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        500,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.CLAUDE_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "claude-3-sonnet-20240229",
+          "max_tokens": 2000,
+          "messages": [
+            {
+              "role": "user",
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "90f363b6-3b7b-4e4a-84e7-c01db4f963bc",
+      "name": "Claude_Weekly_Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst scriptText = response.content?.[0]?.text || '';\n\nlet clean = scriptText.replace(/\\[PAUSE\\]/g, ' ');\nclean = clean.replace(/\\[EMPHASIS:[^\\]]+\\]/g, '$1');\nclean = clean.replace(/\\[EMPHASIS\\]/g, '');\nclean = clean.replace(/\\[SOUND:[^\\]]+\\]/g, '');\nclean = clean.replace(/\\s+/g, ' ').trim();\n\nconst words = clean.split(/\\s+/).filter(w => w.length > 0);\nconst wordCount = words.length;\nconst durationSeconds = Math.round((wordCount / 150) * 60);\n\nconst errors = [];\nif (wordCount < 750) errors.push(`Too short: ${wordCount} words (min 750)`);\nif (wordCount > 1500) errors.push(`Too long: ${wordCount} words (max 1500)`);\nif (durationSeconds < 300) errors.push(`Too short: ${durationSeconds}s`);\nif (durationSeconds > 600) errors.push(`Too long: ${durationSeconds}s`);\n\nconst hasIntro = /intro|welcome/i.test(scriptText);\nif (!hasIntro) errors.push('Missing intro');\n\nconst hasOutro = /outro|thanks for watching/i.test(scriptText);\nif (!hasOutro) errors.push('Missing outro');\n\nconst segmentMarkers = ['story', 'segment', 'next up', 'moving on'];\nconst segmentCount = segmentMarkers.reduce((count, m) => count + (scriptText.toLowerCase().includes(m) ? 1 : 0), 0);\nif (segmentCount < 3) errors.push(`Too few segments: ${segmentCount}`);\n\nreturn {\n  json: {\n    script_content: scriptText,\n    word_count: wordCount,\n    duration_seconds: durationSeconds,\n    valid: errors.length === 0,\n    errors: errors,\n    script_type: 'weekly',\n    tone: 'professional',\n    headline_id: null\n  }\n};"
+      },
+      "id": "a1d1c18f-5f21-4b21-89e8-a46f11b7cb9b",
+      "name": "Validate_Weekly_Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO scripts (id, headline_id, script_type, content, word_count, estimated_duration_seconds, tone, generated_at) VALUES (gen_random_uuid(), NULL, $1, $2, $3, $4, $5, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "1b80eefb-81b8-48ed-ba80-43439769b816",
+      "name": "Insert_Weekly_Script",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (workflow, level, message, metadata, created_at) VALUES ('script_generator', 'INFO', 'Script generation completed', $1::jsonb, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "cebd62ed-ff60-4556-ba45-0858606d416c",
+      "name": "Log_Script_Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        300,
+        1540
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "success",
+              "value": "true"
+            },
+            {
+              "name": "workflow",
+              "value": "script_generator"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "bd853661-1d4a-4914-858b-d67e8ab7ff07",
+      "name": "Script_Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        300,
+        1720
+      ]
+    }
+  ],
+  "connections": {
+    "Daily_Script_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Today_Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly_Script_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Week_Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Today_Headlines": {
+      "main": [
+        [
+          {
+            "node": "Split_Daily_Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Week_Headlines": {
+      "main": [
+        [
+          {
+            "node": "Format_Weekly_Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split_Daily_Headlines": {
+      "main": [
+        [
+          {
+            "node": "Format_Daily_Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format_Daily_Prompt": {
+      "main": [
+        [
+          {
+            "node": "Claude_Daily_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude_Daily_Script": {
+      "main": [
+        [
+          {
+            "node": "Validate_Daily_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate_Daily_Script": {
+      "main": [
+        [
+          {
+            "node": "Insert_Daily_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Daily_Script": {
+      "main": [
+        [
+          {
+            "node": "Update_Headline_Scripted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update_Headline_Scripted": {
+      "main": [
+        [
+          {
+            "node": "Daily_Loop_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily_Loop_Accumulator": {
+      "main": [
+        [
+          {
+            "node": "Log_Script_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format_Weekly_Ranking": {
+      "main": [
+        [
+          {
+            "node": "Claude_Weekly_Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude_Weekly_Ranking": {
+      "main": [
+        [
+          {
+            "node": "Parse_Ranking_Build_Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse_Ranking_Build_Prompt": {
+      "main": [
+        [
+          {
+            "node": "Claude_Weekly_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude_Weekly_Script": {
+      "main": [
+        [
+          {
+            "node": "Validate_Weekly_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate_Weekly_Script": {
+      "main": [
+        [
+          {
+            "node": "Insert_Weekly_Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Weekly_Script": {
+      "main": [
+        [
+          {
+            "node": "Log_Script_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Script_Results": {
+      "main": [
+        [
+          {
+            "node": "Script_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "news-iq"
+    },
+    {
+      "name": "scripts"
+    }
+  ]
+}
+

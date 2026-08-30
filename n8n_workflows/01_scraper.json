@@ -1,0 +1,501 @@
+{
+  "name": "NewsIQ_01_Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyDay",
+            "hour": 7,
+            "minute": 0
+          }
+        ],
+        "mode": "trigger"
+      },
+      "id": "1a8ecd83-4d2b-48ee-99b9-2796cbb77bbe",
+      "name": "Daily_Scraper_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        250,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "categories",
+              "value": "technology,sports,world,entertainment,business"
+            },
+            {
+              "name": "newsapi_url",
+              "value": "https://newsapi.org/v2/top-headlines"
+            },
+            {
+              "name": "max_results",
+              "value": "20"
+            },
+            {
+              "name": "similarity_threshold",
+              "value": "0.85"
+            },
+            {
+              "name": "country",
+              "value": "us"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "64e9a540-0475-4063-a9dc-df7c4c8bbf02",
+      "name": "Set_Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        250,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "c04b73a1-0688-4be7-ba21-075eb1a90643",
+      "name": "Split_Categories",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        250,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.newsapi_url }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "category",
+              "value": "={{ $json.categories.split(',')[0] }}"
+            },
+            {
+              "name": "country",
+              "value": "={{ $json.country }}"
+            },
+            {
+              "name": "pageSize",
+              "value": "={{ $json.max_results }}"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{ $env.NEWSAPI_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "maxRetries": 3
+          }
+        }
+      },
+      "id": "e6d9d319-9791-4466-8f57-3cb4e0b04c07",
+      "name": "Fetch_NewsAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        250,
+        640
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse NewsAPI response and normalize articles\nconst articles = $input.first().json.articles || [];\nconst category = $input.first().json.categories.split(',')[0];\nconst timestamp = new Date().toISOString();\n\nconst normalized = articles.map((article) => ({\n  id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,\n  original_title: article.title || '',\n  normalized_title: (article.title || '').toLowerCase().trim(),\n  category: category,\n  source_key: article.source?.id || 'unknown',\n  source_name: article.source?.name || 'Unknown',\n  url: article.url || '',\n  image_url: article.urlToImage || null,\n  published_at: article.publishedAt,\n  scraped_at: timestamp,\n  description: article.description || '',\n  content: article.content || '',\n  embedding: null,\n  status: 'pending_research',\n  created_at: timestamp,\n  expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()\n})).filter(a => a.original_title && a.original_title.length > 5);\n\nreturn {\n  json: {\n    articles: normalized,\n    count: normalized.length,\n    category: category,\n    timestamp: timestamp\n  }\n};"
+      },
+      "id": "26b082a6-225a-4055-a1b2-0d5e95987e13",
+      "name": "Parse_Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        250,
+        820
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2a8565be-3484-40c7-8d96-9e0a9e7b8ae2",
+      "name": "Accumulate_Articles",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, embedding FROM headlines WHERE created_at > NOW() - INTERVAL '1 day' AND embedding IS NOT NULL LIMIT 1000;",
+        "options": {}
+      },
+      "id": "3f61e817-256c-487d-a80c-f88a3495613c",
+      "name": "Get_Existing_Embeddings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EMBEDDING_SERVICE_URL || 'http://localhost:8000/embed-batch' }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "texts": "={{ $json.articles.map(a => a.normalized_title) }}"
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fb9b64dd-a65e-4072-aa05-d4fbb0298503",
+      "name": "Generate_Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Semantic deduplication using cosine similarity\nconst newArticles = $input.first().json.articles || [];\nconst embeddings = $input.first().json.embeddings || [];\nconst existingRows = $input.all()[1]?.json || [];\n\n// Attach embeddings to articles\nconst articlesWithEmb = newArticles.map((article, i) => ({\n  ...article,\n  embedding: embeddings[i] || null\n}));\n\nfunction cosineSimilarity(vecA, vecB) {\n  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;\n  const dot = vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);\n  const normA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));\n  const normB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));\n  return normA && normB ? dot / (normA * normB) : 0;\n}\n\nconst threshold = parseFloat($input.first().json.similarity_threshold || 0.85);\nconst deduplicated = [];\nlet duplicatesRemoved = 0;\n\nfor (const article of articlesWithEmb) {\n  if (!article.embedding) { deduplicated.push(article); continue; }\n  let isDup = false;\n  for (const existing of existingRows) {\n    const existingEmb = existing.embedding;\n    if (!existingEmb) continue;\n    if (cosineSimilarity(article.embedding, existingEmb) > threshold) {\n      isDup = true; duplicatesRemoved++; break;\n    }\n  }\n  if (!isDup) deduplicated.push(article);\n}\n\nreturn {\n  json: {\n    deduplicated_articles: deduplicated,\n    unique_count: deduplicated.length,\n    duplicates_removed: duplicatesRemoved,\n    total_fetched: articlesWithEmb.length\n  }\n};"
+      },
+      "id": "97cf46e9-39a5-4861-ad9c-b4e16cbbd565",
+      "name": "Semantic_Dedup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": {
+          "table": "headlines",
+          "schema": "public"
+        },
+        "columns": {
+          "mapping": [
+            {
+              "id": "id",
+              "column": "id",
+              "type": "string"
+            },
+            {
+              "id": "original_title",
+              "column": "original_title",
+              "type": "string"
+            },
+            {
+              "id": "normalized_title",
+              "column": "normalized_title",
+              "type": "string"
+            },
+            {
+              "id": "category",
+              "column": "category",
+              "type": "string"
+            },
+            {
+              "id": "url",
+              "column": "url",
+              "type": "string"
+            },
+            {
+              "id": "image_url",
+              "column": "image_url",
+              "type": "string"
+            },
+            {
+              "id": "published_at",
+              "column": "published_at",
+              "type": "string"
+            },
+            {
+              "id": "scraped_at",
+              "column": "scraped_at",
+              "type": "string"
+            },
+            {
+              "id": "description",
+              "column": "description",
+              "type": "string"
+            },
+            {
+              "id": "content",
+              "column": "content",
+              "type": "string"
+            },
+            {
+              "id": "embedding",
+              "column": "embedding",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "column": "status",
+              "type": "string"
+            },
+            {
+              "id": "created_at",
+              "column": "created_at",
+              "type": "string"
+            },
+            {
+              "id": "expires_at",
+              "column": "expires_at",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "nodeVersion": 2,
+          "batchSize": 50
+        }
+      },
+      "id": "18283857-11d5-4f27-b113-ed3b5fb5ce1a",
+      "name": "Insert_Headlines",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1720
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (workflow, level, message, metadata, created_at) VALUES ('scraper', 'INFO', 'Scraper completed', $1::jsonb, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "17709752-3b4c-4f52-9526-46e10d74dc84",
+      "name": "Log_Scraper_Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        250,
+        1900
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "success",
+              "value": "true"
+            },
+            {
+              "name": "workflow",
+              "value": "scraper"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "39110485-0351-43ec-b1a1-9177fac1e7b0",
+      "name": "Scraper_Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        250,
+        2080
+      ]
+    }
+  ],
+  "connections": {
+    "Daily_Scraper_Cron": {
+      "main": [
+        [
+          {
+            "node": "Set_Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set_Variables": {
+      "main": [
+        [
+          {
+            "node": "Split_Categories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split_Categories": {
+      "main": [
+        [
+          {
+            "node": "Fetch_NewsAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch_NewsAPI": {
+      "main": [
+        [
+          {
+            "node": "Parse_Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse_Normalize": {
+      "main": [
+        [
+          {
+            "node": "Accumulate_Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accumulate_Articles": {
+      "main": [
+        [
+          {
+            "node": "Get_Existing_Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate_Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Existing_Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Semantic_Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate_Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Semantic_Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Semantic_Dedup": {
+      "main": [
+        [
+          {
+            "node": "Insert_Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Headlines": {
+      "main": [
+        [
+          {
+            "node": "Log_Scraper_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Scraper_Results": {
+      "main": [
+        [
+          {
+            "node": "Scraper_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "NewsIQ_Error_Handler"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "news-iq"
+    },
+    {
+      "name": "scraper"
+    }
+  ]
+}
+

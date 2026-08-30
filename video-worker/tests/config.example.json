@@ -1,0 +1,41 @@
+{
+  "test_scenarios": [
+    {
+      "name": "smoke_test",
+      "description": "Quick sanity check - 1 request",
+      "requests": 1,
+      "concurrent": 1,
+      "timeout": 180
+    },
+    {
+      "name": "sequential_baseline",
+      "description": "5 videos one at a time - measures baseline performance",
+      "requests": 5,
+      "concurrent": 1,
+      "timeout": 180
+    },
+    {
+      "name": "light_concurrency",
+      "description": "5 videos with 2 workers - tests light load",
+      "requests": 5,
+      "concurrent": 2,
+      "timeout": 300
+    },
+    {
+      "name": "heavy_concurrency",
+      "description": "10 videos with 5 workers - stress test (expect failures)",
+      "requests": 10,
+      "concurrent": 5,
+      "timeout": 600
+    },
+    {
+      "name": "production_simulation",
+      "description": "5 daily shorts + 1 weekly - simulates real daily load",
+      "requests": 6,
+      "concurrent": 1,
+      "timeout": 600
+    }
+  ]
+}
+
+

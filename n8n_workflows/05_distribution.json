@@ -1,0 +1,996 @@
+{
+  "name": "NewsIQ_05_Distribution_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyDay",
+            "hour": 15,
+            "minute": 0
+          }
+        ]
+      },
+      "id": "1e339529-718c-4b12-b94c-681224aa54a5",
+      "name": "Daily_Dist_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT v.id, v.google_drive_id, v.google_drive_link, v.duration_seconds, v.format, s.content, h.original_title FROM videos v JOIN scripts s ON v.script_id = s.id LEFT JOIN headlines h ON s.headline_id = h.id WHERE v.video_type = 'daily_short' AND v.quality_status = 'approved' AND NOT EXISTS (SELECT 1 FROM distributions WHERE video_id = v.id) LIMIT 2;",
+        "options": {}
+      },
+      "id": "35b310c8-a8d1-4b76-9c94-bf8611dcd911",
+      "name": "Get_Approved_Daily",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "1722a01d-088e-471c-93cc-0d300d80521d",
+      "name": "Split_Daily_Videos",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        100,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/download-drive",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "file_id": "={{ $json.google_drive_id }}"
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "53e4c2cf-7f96-4a88-a917-157c55fa633d",
+      "name": "Download_From_Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-youtube",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.local_path }}",
+          "title": "={{ $json.original_title + ' - Daily News' }}",
+          "description": "={{ 'Breaking news daily. Subscribe for more updates.\\n\\n#news #breaking #daily' }}",
+          "category_id": "25",
+          "privacy": "public",
+          "video_type": "shorts"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "4926c23d-d8fb-45ce-841f-1dd3a76f3215",
+      "name": "Post_YouTube_Shorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-tiktok",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.local_path }}",
+          "caption": "={{ $json.original_title + ' #news #breaking #fyp' }}",
+          "privacy_level": "0"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "abc26722-f97e-4f80-8d2c-1abe481e0c77",
+      "name": "Post_TikTok",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-instagram",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.local_path }}",
+          "caption": "={{ $json.original_title + ' #news #breaking #reels' }}",
+          "media_type": "REELS"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "913ee05b-38ae-45af-ac8b-fc4965a7ccf4",
+      "name": "Post_Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const youtube = $input.all()[0]?.json || {}; const tiktok = $input.all()[1]?.json || {}; const instagram = $input.all()[2]?.json || {}; return { json: { video_id: $input.first().json.video_id, platforms: { youtube: { success: youtube.success, post_id: youtube.video_id, url: youtube.url }, tiktok: { success: tiktok.success, post_id: tiktok.post_id, url: tiktok.url }, instagram: { success: instagram.success, post_id: instagram.post_id, url: instagram.url } } } };"
+      },
+      "id": "83512db3-2f01-42ff-81ba-13f8e77e3826",
+      "name": "Merge_Daily_Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO distributions (id, video_id, platform, post_id, post_url, status, posted_at, created_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'posted', NOW(), NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "1c0fc508-e8f7-4c68-af62-f13442e3bbc1",
+      "name": "Record_Daily_Distributions",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1540
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "from": "={{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "={{ $env.USER_PHONE }}",
+        "message": "={{ '✅ Posted to ' + $json.platform.toUpperCase() + '!\\n\\n' + $json.post_url }}"
+      },
+      "id": "1100cbc5-d0e9-41a4-ba83-6f6f248cf555",
+      "name": "WhatsApp_Notify_Daily",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1720
+      ],
+      "credentials": {
+        "twilio": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "dc705547-ef2f-4995-ae7d-1ea66e01f7d7",
+      "name": "Daily_Dist_Accumulator",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        100,
+        1900
+      ]
+    },
+    {
+      "parameters": {
+        "rule": [
+          {
+            "type": "everyWeek",
+            "hour": 14,
+            "minute": 0,
+            "weekday": 1
+          }
+        ]
+      },
+      "id": "592312dd-bfd4-4434-a0cd-2a5ecaa96fdd",
+      "name": "Weekly_Dist_Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT v.id, v.google_drive_id, v.google_drive_link, v.duration_seconds, v.format, s.content FROM videos v JOIN scripts s ON v.script_id = s.id WHERE v.video_type = 'weekly' AND v.quality_status = 'pending_review' AND NOT EXISTS (SELECT 1 FROM distributions WHERE video_id = v.id) ORDER BY v.created_at DESC LIMIT 1;",
+        "options": {}
+      },
+      "id": "18c72baf-80be-4561-bb7f-8e96fb7c45e4",
+      "name": "Get_Pending_Weekly",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return { json: { video_id: $input.first().json.id, approved: false, approval_status: 'not_configured', drive_link: $input.first().json.google_drive_link, google_drive_id: $input.first().json.google_drive_id, video_db_id: $input.first().json.id } };"
+      },
+      "id": "6f3a9b47-4dd0-4608-8aea-4d1d70b24548",
+      "name": "Check_Email_Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        500,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.approved }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "a5541591-4108-4622-8608-459f28205202",
+      "name": "Approval_Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        500,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/download-drive",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "file_id": "={{ $json.google_drive_id }}"
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "187b59af-9131-4dca-a948-0f9532b83526",
+      "name": "Download_Weekly_Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-youtube",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.local_path }}",
+          "title": "={{ 'Weekly News Brief - ' + new Date().toISOString().split('T')[0] }}",
+          "description": "={{ 'Full week in review. Subscribe for weekly updates.\\n\\n#news #weekly #worldnews' }}",
+          "category_id": "25",
+          "privacy": "public",
+          "video_type": "long"
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "d32c283c-cea5-4443-bd72-f758d39cdf53",
+      "name": "Post_YouTube_Weekly_Main",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/extract-shortform",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.local_path }}",
+          "min_segments": 3,
+          "max_segments": 4,
+          "target_duration_s": 45
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "4052fbfd-d753-4534-b460-c912768e8f5c",
+      "name": "Extract_Shortform_Segments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "bce63de4-8b91-48da-b298-4526bdaf1454",
+      "name": "Split_Extracted_Segments",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/upload-drive",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.segment_path }}",
+          "filename": "={{ 'Weekly_Short_' + $json.segment_index + '_' + new Date().toISOString().split('T')[0] + '.mp4' }}",
+          "folder_id": "={{ $env.GOOGLE_FOLDER_ID }}"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "c3ed1e29-1fc3-4038-b825-a20055b49415",
+      "name": "Upload_Segment_To_Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-youtube",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.segment_path }}",
+          "title": "={{ 'Weekly Highlight ' + ($json.segment_index + 1) + ' - News Brief' }}",
+          "description": "={{ 'Weekly news highlight. Subscribe for full briefs.\\n\\n#news #weekly #shorts' }}",
+          "category_id": "25",
+          "privacy": "public",
+          "video_type": "shorts"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "2bc467e3-63f6-465c-a2c0-8938b63a53e8",
+      "name": "Post_Segment_YouTube_Shorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-tiktok",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.segment_path }}",
+          "caption": "={{ 'Weekly news highlight ' + ($json.segment_index + 1) + ' #news #weekly #fyp' }}",
+          "privacy_level": "0"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "2bd67b5f-50cf-4b52-bc64-857d71094f3d",
+      "name": "Post_Segment_TikTok",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        1900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VIDEO_SERVICE_URL || 'http://localhost:8001' }}/post-instagram",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "video_path": "={{ $json.segment_path }}",
+          "caption": "={{ 'Weekly news highlight ' + ($json.segment_index + 1) + ' #news #weekly #reels' }}",
+          "media_type": "REELS"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "5add10c0-072b-4c9c-9ff2-16f8dfaea62a",
+      "name": "Post_Segment_Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        500,
+        2080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const yt = $input.all()[0]?.json || {}; const tt = $input.all()[1]?.json || {}; const ig = $input.all()[2]?.json || {}; return { json: { segment_index: $input.first().json.segment_index, segment_path: $input.first().json.segment_path, platforms: { youtube: { success: yt.success, post_id: yt.video_id, url: yt.url }, tiktok: { success: tt.success, post_id: tt.post_id, url: tt.url }, instagram: { success: ig.success, post_id: ig.post_id, url: ig.url } } } };"
+      },
+      "id": "05e12d66-6675-4c5a-ad59-47b3d2f13e42",
+      "name": "Merge_Segment_Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        500,
+        2260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO distributions (id, video_id, platform, post_id, post_url, status, posted_at, created_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'posted', NOW(), NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "1c1b884c-661a-4d75-9b4d-e938e1aee0d9",
+      "name": "Record_Segment_Distributions",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        2440
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "0faf7815-e0b8-4fd8-9e6f-350fa0f65651",
+      "name": "Segment_Loop_Accumulator",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        500,
+        2620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE videos SET quality_status = 'approved', approved_at = NOW() WHERE id = $1 RETURNING id;",
+        "options": {}
+      },
+      "id": "f8d148f2-de64-46ce-9c4f-cbec85c589a6",
+      "name": "Update_Video_Approved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        500,
+        2800
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "from": "={{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "={{ $env.USER_PHONE }}",
+        "message": "={{ '📺 Weekly content posted!\\nMain: ' + $json.main_url + '\\nShorts: ' + ($json.short_urls || []).join('\\n') }}"
+      },
+      "id": "f9e36ed9-5c71-4968-844e-c618bfdc5fda",
+      "name": "Weekly_WhatsApp_Notify",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        500,
+        2980
+      ],
+      "credentials": {
+        "twilio": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "5c46dac4-b1cd-4ed1-a6e6-2cbe8b67330b",
+      "name": "Weekly_Dist_Accumulator",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        500,
+        3160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (workflow, level, message, metadata, created_at) VALUES ('distribution', 'INFO', 'Distribution completed', $1::jsonb, NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "076cc8e2-e668-48f5-89e2-2dd971da3e76",
+      "name": "Log_Dist_Results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        300,
+        3340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "REPLACE_IN_N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "success",
+              "value": "true"
+            },
+            {
+              "name": "workflow",
+              "value": "distribution"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "eb329afe-32c0-440b-99f0-0246812d169d",
+      "name": "Dist_Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        300,
+        3520
+      ]
+    }
+  ],
+  "connections": {
+    "Daily_Dist_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Approved_Daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Approved_Daily": {
+      "main": [
+        [
+          {
+            "node": "Split_Daily_Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split_Daily_Videos": {
+      "main": [
+        [
+          {
+            "node": "Download_From_Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download_From_Drive": {
+      "main": [
+        [
+          {
+            "node": "Post_YouTube_Shorts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_YouTube_Shorts": {
+      "main": [
+        [
+          {
+            "node": "Post_TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_TikTok": {
+      "main": [
+        [
+          {
+            "node": "Post_Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_Instagram": {
+      "main": [
+        [
+          {
+            "node": "Merge_Daily_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge_Daily_Results": {
+      "main": [
+        [
+          {
+            "node": "Record_Daily_Distributions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record_Daily_Distributions": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp_Notify_Daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp_Notify_Daily": {
+      "main": [
+        [
+          {
+            "node": "Daily_Dist_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily_Dist_Accumulator": {
+      "main": [
+        [
+          {
+            "node": "Log_Dist_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly_Dist_Cron": {
+      "main": [
+        [
+          {
+            "node": "Get_Pending_Weekly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get_Pending_Weekly": {
+      "main": [
+        [
+          {
+            "node": "Check_Email_Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check_Email_Approval": {
+      "main": [
+        [
+          {
+            "node": "Approval_Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval_Check": {
+      "main": [
+        [
+          {
+            "node": "Download_Weekly_Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Weekly_Dist_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download_Weekly_Video": {
+      "main": [
+        [
+          {
+            "node": "Post_YouTube_Weekly_Main",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_YouTube_Weekly_Main": {
+      "main": [
+        [
+          {
+            "node": "Extract_Shortform_Segments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract_Shortform_Segments": {
+      "main": [
+        [
+          {
+            "node": "Split_Extracted_Segments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split_Extracted_Segments": {
+      "main": [
+        [
+          {
+            "node": "Upload_Segment_To_Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload_Segment_To_Drive": {
+      "main": [
+        [
+          {
+            "node": "Post_Segment_YouTube_Shorts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_Segment_YouTube_Shorts": {
+      "main": [
+        [
+          {
+            "node": "Post_Segment_TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_Segment_TikTok": {
+      "main": [
+        [
+          {
+            "node": "Post_Segment_Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post_Segment_Instagram": {
+      "main": [
+        [
+          {
+            "node": "Merge_Segment_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge_Segment_Results": {
+      "main": [
+        [
+          {
+            "node": "Record_Segment_Distributions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record_Segment_Distributions": {
+      "main": [
+        [
+          {
+            "node": "Segment_Loop_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Segment_Loop_Accumulator": {
+      "main": [
+        [
+          {
+            "node": "Update_Video_Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update_Video_Approved": {
+      "main": [
+        [
+          {
+            "node": "Weekly_WhatsApp_Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly_WhatsApp_Notify": {
+      "main": [
+        [
+          {
+            "node": "Weekly_Dist_Accumulator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly_Dist_Accumulator": {
+      "main": [
+        [
+          {
+            "node": "Log_Dist_Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Dist_Results": {
+      "main": [
+        [
+          {
+            "node": "Dist_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "news-iq"
+    },
+    {
+      "name": "distribution"
+    },
+    {
+      "name": "shortform"
+    }
+  ]
+}
+
