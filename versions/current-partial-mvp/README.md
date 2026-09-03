@@ -1,5 +1,7 @@
 # NewsIQ — Current Partial-MVP State
 
+[← Version / Revision Table of Contents](../TABLE_OF_CONTENTS.md) · [Architecture](ARCHITECTURE.md)
+
 **Status:** CURRENT PROJECT STATE · PARTIAL MVP · not live production
 
 ## Implemented/evidenced components
@@ -11,6 +13,10 @@
 - Railway build/deployment/debug evidence;
 - multiple genuine W4 video-generation revisions;
 - multiple/partial W5 distribution variants.
+
+## Architecture
+
+[Open the current partial-MVP architecture →](ARCHITECTURE.md)
 
 ## Current pipeline
 
