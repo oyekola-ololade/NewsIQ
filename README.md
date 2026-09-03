@@ -2,8 +2,6 @@
 
 > **Evidence status: Partial MVP — not a live production system**
 
-**[Table of Contents →](TABLE_OF_CONTENTS.md)** · **[Version / Revision Archive →](versions/TABLE_OF_CONTENTS.md)** · **[Current Architecture →](versions/current-partial-mvp/ARCHITECTURE.md)**
-
 NewsIQ is an AI-assisted news-intelligence pipeline built from five n8n workflow exports, Python services, a PostgreSQL/pgvector schema, and Docker/Railway-oriented deployment files. The repository shows real implementation work while keeping unverified runtime and publishing claims outside the evidence boundary.
 
 [Open the visual project page](./index.html)
@@ -12,17 +10,32 @@ NewsIQ is an AI-assisted news-intelligence pipeline built from five n8n workflow
 
 ## Table of contents
 
-- [Repository Table of Contents](TABLE_OF_CONTENTS.md)
-- [Version / Revision Table of Contents](versions/TABLE_OF_CONTENTS.md)
-- [Current partial-MVP architecture](versions/current-partial-mvp/ARCHITECTURE.md)
-- [Architecture documentation](docs/architecture.md)
-- [Workflow inventory](docs/workflow-inventory.md)
-- [Verification matrix](docs/verification.md)
-- [Security](SECURITY.md)
-- [Current demo placeholder](evidence/current/demo/README.md)
-- [Current screenshot/evidence placeholder](evidence/current/screenshots/README.md)
+- [What exists](#what-exists)
+- [Architecture](#architecture)
+- [Workflow inventory](#workflow-inventory)
+- [Version / revision history](#version--revision-history)
+- [Public-package safety corrections](#public-package-safety-corrections)
+- [Local setup](#local-setup)
+- [Verification status](#verification-status)
+- [Known limitations](#known-limitations)
+- [Security](#security)
+- [Author](#author)
 
-Historical W4 revisions also have architecture pages. They do not receive fake demo/screenshot folders.
+### Revision / architecture quick links
+
+| Record | Status | README | Architecture |
+|---|---|---|---|
+| Current partial MVP | **Current project state** | [open](versions/current-partial-mvp/README.md) | [diagram](versions/current-partial-mvp/ARCHITECTURE.md) |
+| W4 Daily v1 | Historical revision | [open](versions/w4-daily/v1/README.md) | [diagram](versions/w4-daily/v1/ARCHITECTURE.md) |
+| W4 Daily v2 | Historical revision | [open](versions/w4-daily/v2/README.md) | [diagram](versions/w4-daily/v2/ARCHITECTURE.md) |
+| W4 Daily v3 | Historical revision | [open](versions/w4-daily/v3/README.md) | [diagram](versions/w4-daily/v3/ARCHITECTURE.md) |
+| W4 Daily v4 | Latest known daily by chronology; canonical pending | [open](versions/w4-daily/v4/README.md) | [diagram](versions/w4-daily/v4/ARCHITECTURE.md) |
+| W4 Weekly v1 | Historical revision | [open](versions/w4-weekly/v1/README.md) | [diagram](versions/w4-weekly/v1/ARCHITECTURE.md) |
+| W4 Weekly v2 | Historical revision | [open](versions/w4-weekly/v2/README.md) | [diagram](versions/w4-weekly/v2/ARCHITECTURE.md) |
+| W4 Weekly v3 | Latest known weekly by chronology; canonical pending | [open](versions/w4-weekly/v3/README.md) | [diagram](versions/w4-weekly/v3/ARCHITECTURE.md) |
+| W5 distribution evolution | Partial / evolving | [open](versions/w5-distribution/README.md) | [diagram](versions/w5-distribution/ARCHITECTURE.md) |
+
+The `versions/` folder is an engineering history, not a claim that the highest-numbered W4 export is automatically canonical.
 
 ## What exists
 
@@ -71,20 +84,20 @@ The five public exports contain **92 nodes**:
 | `04_video_generator.json` | 18 | Script selection, TTS, video composition, storage/approval orchestration |
 | `05_distribution.json` | 31 | Approval gate, distribution orchestration, short-form segmentation, records, notifications |
 
+## Version / revision history
+
+NewsIQ does not have one clean project-wide semantic version sequence. The evidence supports a current partial-MVP project state, a genuine W4 Daily v1→v4 revision line, a genuine W4 Weekly v1→v3 revision line, and W5 evolution from sequential distribution toward independent parallel branches.
+
+Each record above has its own README and architecture page. Historical revisions do not receive fabricated demos or screenshots.
+
+Canonical W4/W5 selection requires controlled comparison plus configured execution against the current database/video-worker/distribution contract.
+
 ## Public-package safety corrections
 
 - Social publishing does not fabricate successful external post IDs.
 - Weekly approval defaults are bounded rather than silently authorizing publishing.
 - Credential identifiers and environment-specific public configuration use placeholders.
 - No claim is made that the complete intended system is live, production-ready, or publishing to real social accounts.
-
-## Version boundary
-
-Historical archive evidence contains multiple revisions of Workflow 4 daily and weekly variants. The current public `04_video_generator.json` is a package representation, not proof that the newest archived revision has been selected as canonical.
-
-Canonical W4/W5 selection requires controlled comparison plus configured execution against the current database/video-worker/distribution contract.
-
-See the [Version / Revision Table of Contents](versions/TABLE_OF_CONTENTS.md) for every recovered revision and its architecture diagram.
 
 ## Local setup
 
