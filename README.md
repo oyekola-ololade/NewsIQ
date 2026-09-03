@@ -2,11 +2,27 @@
 
 > **Evidence status: Partial MVP — not a live production system**
 
+**[Table of Contents →](TABLE_OF_CONTENTS.md)** · **[Version / Revision Archive →](versions/TABLE_OF_CONTENTS.md)** · **[Current Architecture →](versions/current-partial-mvp/ARCHITECTURE.md)**
+
 NewsIQ is an AI-assisted news-intelligence pipeline built from five n8n workflow exports, Python services, a PostgreSQL/pgvector schema, and Docker/Railway-oriented deployment files. The repository shows real implementation work while keeping unverified runtime and publishing claims outside the evidence boundary.
 
 [Open the visual project page](./index.html)
 
 <p align="center"><img src="assets/current-pipeline.svg" width="100%" alt="NewsIQ partial MVP pipeline"></p>
+
+## Table of contents
+
+- [Repository Table of Contents](TABLE_OF_CONTENTS.md)
+- [Version / Revision Table of Contents](versions/TABLE_OF_CONTENTS.md)
+- [Current partial-MVP architecture](versions/current-partial-mvp/ARCHITECTURE.md)
+- [Architecture documentation](docs/architecture.md)
+- [Workflow inventory](docs/workflow-inventory.md)
+- [Verification matrix](docs/verification.md)
+- [Security](SECURITY.md)
+- [Current demo placeholder](evidence/current/demo/README.md)
+- [Current screenshot/evidence placeholder](evidence/current/screenshots/README.md)
+
+Historical W4 revisions also have architecture pages. They do not receive fake demo/screenshot folders.
 
 ## What exists
 
@@ -67,6 +83,8 @@ The five public exports contain **92 nodes**:
 Historical archive evidence contains multiple revisions of Workflow 4 daily and weekly variants. The current public `04_video_generator.json` is a package representation, not proof that the newest archived revision has been selected as canonical.
 
 Canonical W4/W5 selection requires controlled comparison plus configured execution against the current database/video-worker/distribution contract.
+
+See the [Version / Revision Table of Contents](versions/TABLE_OF_CONTENTS.md) for every recovered revision and its architecture diagram.
 
 ## Local setup
 
