@@ -1,7 +1,13 @@
 # NewsIQ W4 Daily — v1
 
+[← Revision Table of Contents](../../TABLE_OF_CONTENTS.md) · [Architecture](ARCHITECTURE.md) · [Revision Record](REVISION_RECORD.md)
+
 **Status:** HISTORICAL IMPLEMENTATION REVISION  
 **Lineage:** first normalized file in the genuine four-revision Daily Robust sequence.
+
+## Architecture
+
+[Open the v1 architecture diagram →](ARCHITECTURE.md)
 
 ## What is supported
 
@@ -26,4 +32,4 @@ Not automatically canonical. Chronology alone is insufficient.
 
 ## Media
 
-Historical workflow revision. No demo/screenshot placeholders.
+Historical workflow revision. Architecture is documented; no fake demo/screenshot placeholders.
